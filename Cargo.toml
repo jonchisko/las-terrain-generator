@@ -1,0 +1,9 @@
+[package]
+name = "las-terrain-generator"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = "0.25.8"
+las = { version = "0.9", features = ["laz"] }
+kiddo = "5.2.2"
