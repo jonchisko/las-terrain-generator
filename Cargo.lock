@@ -583,6 +583,8 @@ dependencies = [
 name = "las-terrain-generator"
 version = "0.1.0"
 dependencies = [
+ "exr",
+ "half",
  "image",
  "kiddo",
  "las",

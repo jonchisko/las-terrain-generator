@@ -7,3 +7,5 @@ edition = "2024"
 image = "0.25.8"
 las = { version = "0.9", features = ["laz"] }
 kiddo = "5.2.2"
+exr = "1.73.0"
+half = "2.6.0"
