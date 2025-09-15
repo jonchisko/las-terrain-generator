@@ -4,6 +4,11 @@ use exr::math::Vec2;
 use exr::prelude::LayerAttributes;
 use exr::prelude::WritableImage;
 use las::Reader;
+use libblur::AnisotropicRadius;
+use libblur::BlurImageMut;
+use libblur::EdgeMode;
+use libblur::EdgeMode2D;
+use libblur::ThreadingPolicy;
 use std::error::Error;
 use std::fs;
 use std::num::NonZero;
@@ -20,13 +25,11 @@ const RESULTS_DIR_PATH: &'static str = "./results/";
 fn main() -> Result<(), Box<dyn Error>> {
     let file_paths = get_files_in_directory()?;
     let (min_height, max_height) = get_height_bounds(&file_paths)?;
-
-    println!("Number of data files: {}", file_paths.len());
-    println!("Area min height {}, max height {}", min_height, max_height);
-
     let cpus = thread::available_parallelism()?;
     let work_amount = file_paths.len() / cpus;
 
+    println!("Number of data files: {}", file_paths.len());
+    println!("Area min height {}, max height {}", min_height, max_height);
     println!(
         "Number of CPUs: {}, average work per thread: {}",
         cpus, work_amount
@@ -72,7 +75,10 @@ fn create_texture(
 
     let (delta_x, delta_y) = (max_x - min_x, max_y - min_y);
 
-    let (dim_x, dim_y) = (1024usize, 1024usize);
+    let dim_multiplier = 2;
+    let channel_num = 3;
+    let (dim_x, dim_y) = (1024usize * dim_multiplier, 1024usize * dim_multiplier);
+    let dim_x_adapted = dim_x * channel_num;
 
     let point_data = las_reader
         .points()
@@ -96,23 +102,15 @@ fn create_texture(
     let neighbours_n = 3;
     let nearest_neighbours_n = NonZero::new(neighbours_n).unwrap();
 
-    let mut naming = file_path
-        .file_stem()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .split('_')
-        .skip(1);
+    let mut buffer_f32: Vec<f32> = vec![0f32; dim_x_adapted * dim_y];
 
-    let x_id = naming.next().unwrap();
-    let y_id = naming.next().unwrap();
-
-    let channels = SpecificChannels::rgb(|position: Vec2<usize>| {
-        let (x_ind, y_ind) = (position.0, dim_y - position.1);
+    for linear_index in (0..(dim_x_adapted * dim_y)).step_by(channel_num) {
+        let (ind_x, ind_y) = (linear_index % dim_x_adapted, linear_index / dim_x_adapted);
+        let (ind_x, ind_y) = (ind_x, dim_y - ind_y);
 
         let (geo_x, geo_y) = (
-            (x_ind as f64 / dim_x as f64) * delta_x as f64 + min_x,
-            (y_ind as f64 / dim_y as f64) * delta_y as f64 + min_y,
+            (ind_x as f64 / dim_x_adapted as f64) * delta_x as f64 + min_x,
+            (ind_y as f64 / dim_y as f64) * delta_y as f64 + min_y,
         );
 
         let nearest_neighbours =
@@ -125,7 +123,33 @@ fn create_texture(
 
         let height_result = height_result / neighbours_n as f32;
 
-        (height_result, height_result, height_result)
+        buffer_f32[linear_index] = height_result;
+        buffer_f32[linear_index + 1] = height_result;
+        buffer_f32[linear_index + 2] = height_result;
+    }
+
+    let mut blured_image = BlurImageMut::borrow(
+        &mut buffer_f32,
+        dim_x as u32,
+        dim_y as u32,
+        libblur::FastBlurChannels::Channels3,
+    );
+
+    libblur::fast_gaussian_f32(
+        &mut blured_image,
+        AnisotropicRadius {
+            x_axis: 10,
+            y_axis: 10,
+        },
+        ThreadingPolicy::Adaptive,
+        EdgeMode2D::anisotropy(EdgeMode::Wrap, EdgeMode::Wrap),
+    )?;
+
+    let channels = SpecificChannels::rgb(|position: Vec2<usize>| {
+        let linear_index = position.0 * channel_num + position.1 * dim_x_adapted;
+        let data = buffer_f32[linear_index];
+
+        (data, data, data)
     });
 
     let image = exr::prelude::Image::from_layer(exr::prelude::Layer::new(
@@ -135,9 +159,9 @@ fn create_texture(
         channels,
     ));
 
-    image
-        .write()
-        .to_file(format!("{}{}_{}.exr", RESULTS_DIR_PATH, x_id, y_id))?;
+    let file_name = create_indexed_name(file_path);
+
+    image.write().to_file(file_name)?;
 
     Ok(())
 }
@@ -175,4 +199,19 @@ fn get_files_in_directory() -> Result<Vec<std::path::PathBuf>, Box<dyn Error>> {
     }
 
     Ok(file_paths)
+}
+
+fn create_indexed_name(file_path: &PathBuf) -> String {
+    let mut naming = file_path
+        .file_stem()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split('_')
+        .skip(1);
+
+    let x_id = naming.next().unwrap();
+    let y_id = naming.next().unwrap();
+
+    format!("{}{}_{}.exr", RESULTS_DIR_PATH, x_id, y_id)
 }
