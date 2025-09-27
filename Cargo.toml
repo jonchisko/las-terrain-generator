@@ -8,3 +8,5 @@ las = { version = "0.9", features = ["laz"] }
 kiddo = "5.2.2"
 exr = "1.73.0"
 libblur = "0.20.0"
+clap = { version = "4.5.48", features = ["derive"] }
+reqwest = "0.12.23"
