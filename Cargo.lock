@@ -956,6 +956,8 @@ dependencies = [
  "libblur",
  "rand",
  "reqwest",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

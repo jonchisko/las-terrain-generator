@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display, str::FromStr};
+use std::{error::Error, fmt::Display, fs, path::PathBuf, str::FromStr};
 
 use clap::Parser;
 
@@ -225,6 +225,21 @@ pub fn read_config_from_cli() -> Result<Config, CommandlineParsingErrors> {
         return Err(CommandlineParsingErrors::IncorrectArgumentStructure(
             "At least one possible block must be given",
         ));
+    }
+
+    match fs::exists(&arguments.destination_folder) {
+        Ok(val) => {
+            if !val {
+                return Err(CommandlineParsingErrors::IncorrectArgumentStructure(
+                    "Destination folder does not exist",
+                ));
+            }
+        }
+        Err(_) => {
+            return Err(CommandlineParsingErrors::IncorrectArgumentStructure(
+                "Issue with the destination folder",
+            ));
+        }
     }
 
     Config::try_from(&arguments)

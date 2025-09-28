@@ -12,9 +12,19 @@ use crate::core::Config;
 use crate::core::Point;
 use crate::global_constants::{MAX_POINT_DIM, MIN_POINT_DIM};
 
-pub fn get_laz_data(cpus: NonZero<usize>, config: &Config) -> Vec<Reader> {
+pub struct LazData {
+    pub offset_from_center: (i16, i16),
+    pub bounds_max: (f64, f64, f64),
+    pub bounds_min: (f64, f64, f64),
+    pub points: Vec<las::Point>,
+}
+
+pub fn get_laz_data(cpus: NonZero<usize>, config: &Config) -> Vec<LazData> {
     let points = filter_points(&config);
-    let mut laz_readers: Vec<Reader> = Vec::new();
+    let mut laz_readers: Vec<LazData> = Vec::new();
+
+    let coordinate_origin = points.first().expect("There is no points");
+    let coordinate_origin = (coordinate_origin.0, coordinate_origin.1);
 
     let shared_points = Arc::new(points);
     let shared_blocks = Arc::new(
@@ -52,7 +62,7 @@ pub fn get_laz_data(cpus: NonZero<usize>, config: &Config) -> Vec<Reader> {
                         block_number, point.0, point.1
                     );
 
-                    let response = client.get(&url).send();
+                    let response = client.get(&url).timeout(Duration::from_secs(300)).send();
 
                     if response.is_err() {
                         println!("HTTP get not successful, error. Skipping point url {}", url);
@@ -80,7 +90,14 @@ pub fn get_laz_data(cpus: NonZero<usize>, config: &Config) -> Vec<Reader> {
                         continue;
                     }
 
-                    tx.send(Cursor::new(data_bytes.unwrap()))
+                    let offset_from_center =
+                        (point.0 - coordinate_origin.0, point.1 - coordinate_origin.1);
+
+                    let mut laz_reader = Reader::new(Cursor::new(data_bytes.unwrap())).unwrap();
+                    let bounds = laz_reader.header().bounds();
+                    let points = laz_reader.points().collect::<Result<Vec<_>, _>>().unwrap();
+
+                    tx.send((offset_from_center, bounds, points))
                         .expect(&format!("Issue in thread: '{}', in tx send", id));
 
                     thread::sleep(Duration::from_secs(1 * rand::thread_rng().gen_range(0..5)));
@@ -93,10 +110,16 @@ pub fn get_laz_data(cpus: NonZero<usize>, config: &Config) -> Vec<Reader> {
         });
     }
 
+    // Last TX must be dropped to ensure rx does not continue listening
     drop(tx);
 
     for received in rx {
-        laz_readers.push(Reader::new(received).unwrap());
+        laz_readers.push(LazData {
+            offset_from_center: received.0,
+            bounds_max: (received.1.max.x, received.1.max.y, received.1.max.z),
+            bounds_min: (received.1.min.x, received.1.min.y, received.1.min.z),
+            points: received.2,
+        });
     }
 
     laz_readers
