@@ -16,6 +16,7 @@ struct ComputeConfig {
     texture_resolution: u16,
     max_height: f64,
     min_height: f64,
+    real_world_dimensions_m: f64,
 }
 
 pub fn compute_textures_parallel(
@@ -58,6 +59,7 @@ pub fn compute_textures_parallel(
         texture_resolution: config.resolution,
         max_height: max_height,
         min_height: min_height,
+        real_world_dimensions_m: 1000.0,
     };
 
     let json = serde_json::to_string_pretty(&cfg)?;
@@ -164,10 +166,6 @@ fn get_coordinate_name(value: i16) -> String {
     }
 }
 
-fn write_texture_to_file() -> () {
-    todo!()
-}
-
 fn create_image<'a>(
     channel_num: usize,
     dim_x: usize,
@@ -219,7 +217,7 @@ fn blur_image(
             y_axis: kernel_size,
         },
         ThreadingPolicy::Adaptive,
-        EdgeMode2D::anisotropy(EdgeMode::Wrap, EdgeMode::Wrap),
+        EdgeMode2D::anisotropy(EdgeMode::Clamp, EdgeMode::Clamp),
     )?;
 
     Ok(())
